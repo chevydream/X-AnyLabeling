@@ -1,17 +1,18 @@
 import functools
 import html
-import math
 import json
+import math
 import os
 import os.path as osp
-import shutil
 import pathlib
-import cv2
 import re
-import yaml
-import webbrowser
-from difflib import SequenceMatcher
+import shutil
 import time
+import webbrowser
+
+import cv2
+from difflib import SequenceMatcher
+import yaml
 
 import imgviz
 import natsort
@@ -3006,9 +3007,8 @@ class LabelingWidget(LabelDialog):
 
     def load_shapes(self, shapes, replace=True, update_last_label=True):
         self._no_selection_slot = True
-        if not self.canvas.is_auto_labeling: #自动标注时, 为提速不绘制
-            for shape in shapes:
-                self.add_label(shape, update_last_label=update_last_label)
+        for shape in shapes:
+            self.add_label(shape, update_last_label=update_last_label)
         self.label_list.clearSelection()
         self._no_selection_slot = False
         self.canvas.load_shapes(shapes, replace=replace)
@@ -3062,16 +3062,12 @@ class LabelingWidget(LabelDialog):
             if osp.dirname(filename) and not osp.exists(osp.dirname(filename)):
                 os.makedirs(osp.dirname(filename))
 
-            # 若没有图片数据, 则基于图片路径读取宽和高; 否则, 使用图片数据的宽高
             if image_data is None:
-                with open(self.image_path, 'rb') as f:
-                    f.read(163)
-                    h = int.from_bytes(f.read(2), 'big')
-                    w = int.from_bytes(f.read(2), 'big')
+                w, h = utils.get_pil_img_dim(self.image_path)
             else:
                 h = self.image.height()
                 w = self.image.width()
-            
+
             label_file.save(
                 filename=filename,
                 shapes=shapes,
@@ -5967,24 +5963,21 @@ class LabelingWidget(LabelDialog):
         self.process_next_image(progress_dialog)
 
     def process_next_image(self, progress_dialog):
-        infer_start1 = time.time()
+        total_images = len(self.image_list)
 
-        if self.image_index < len(self.image_list):
+        if self.image_index < total_images:
             filename = self.image_list[self.image_index]
             self.filename = filename
 
-            infer_start = time.time()
-            #self.load_file(self.filename)  # 发现根本不需要调用load_file函数, 只要执行下面五句就行了
             self.image_path = filename
             self.clear_auto_labeling_marks()
             self.canvas.set_auto_labeling(True)
-            self.label_file = LabelFile(osp.splitext(filename)[0] + ".json", osp.dirname(filename), False)
             self.label_list.clear()
-            self.load_shapes(self.label_file.shapes, update_last_label=False)
-            infer_time = time.time() - infer_start
-            #print(f"\n图片加载的耗时: {infer_time * 1000:.2f}ms")
+            label_path = osp.splitext(filename)[0] + ".json"
+            if os.path.exists(label_path):
+                self.label_file = LabelFile(label_path, osp.dirname(filename), False)
+                self.load_shapes(self.label_file.shapes, update_last_label=False)
 
-            infer_start = time.time()
             if self.text_prompt:
                 self.auto_labeling_widget.model_manager.predict_shapes(
                     self.image, self.filename, text_prompt=self.text_prompt
@@ -5997,29 +5990,32 @@ class LabelingWidget(LabelDialog):
                 self.auto_labeling_widget.model_manager.predict_shapes(
                     self.image, self.filename
                 )
-            infer_time = time.time() - infer_start
-            #print(f"目标预测的耗时: {infer_time * 1000:.2f}ms")
 
             # Update the progress dialog
-            infer_start = time.time()
-            if self.image_index % 16 == 0:
+            if total_images <= 100:
+                update_flag = True
+            else:
+                update_interval = max(1, total_images // 100)
+                update_flag = self.image_index % update_interval == 0
+            # Ensure more frequent updates near the start and end
+            if self.image_index < 10 or self.image_index >= total_images - 10:
+                update_flag = True
+            if update_flag:
                 progress_dialog.setValue(self.image_index)
-            infer_time = time.time() - infer_start
-            #print(f"更新对话框的耗时: {infer_time * 1000:.2f}ms")
 
             self.image_index += 1
             if not self.cancel_processing:
                 delay_ms = 1
+                self.canvas.is_painting = False
                 QtCore.QTimer.singleShot(
                     delay_ms, lambda: self.process_next_image(progress_dialog)
                 )
             else:
                 self.cancel_operation()
+                self.canvas.is_painting = True
         else:
             self.finish_processing(progress_dialog)
-
-        infer_time = time.time() - infer_start1
-        print(f"{self.filename} 耗时: {infer_time * 1000:.2f}ms")
+            self.canvas.is_painting = True
 
     def cancel_operation(self):
         self.cancel_processing = True
@@ -6238,47 +6234,6 @@ class LabelingWidget(LabelDialog):
         if not self.image or not self.image_path:
             return
 
-        #----------------------------------------------------------------------------------
-        def calculate_iou(box1, box2):
-            # 计算交集区域
-            xi1 = max(box1[0], box2[0])
-            yi1 = max(box1[1], box2[1])
-            xi2 = min(box1[2], box2[2])
-            yi2 = min(box1[3], box2[3])
-            inter_area = max(xi2 - xi1, 0) * max(yi2 - yi1, 0)
-            # 计算并集区域
-            box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
-            box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
-            union_area = box1_area + box2_area - inter_area
-            # 计算IOU
-            iou = inter_area / union_area if union_area > 0 else 0
-            return iou
-
-        count = [0,0,0,0]
-        badResultShapes = []
-        for shape1 in auto_labeling_result.shapes:
-            points = shape1.points
-            a = [points[0].x(), points[0].y(), points[2].x(), points[2].y()]
-            flag = 0
-            for shape2 in self.canvas.shapes:
-                if shape1.label == shape2.label: # 只在类型一样时才比较iou, 否则都按[多/少]来处理
-                    points = shape2.points
-                    b = [points[0].x(), points[0].y(), points[2].x(), points[2].y()]
-                    iou = calculate_iou(a, b)
-                    if iou > 0.80:
-                        flag = 1
-                    elif iou > 0.05:
-                        flag = 2
-            count[flag] += 1 #0-多识少标, 1-标定OK, 2-标定偏了
-            if flag != 1: # 收集 0-多识少标 和 2-标定偏了
-                badResultShapes.append(shape1)
-
-        countA = len(auto_labeling_result.shapes)
-        countB = len(self.canvas.shapes)
-        if countA < countB:
-            count[3] += 1 #3-少识多标
-        # ----------------------------------------------------------------------------------
-
         # Clear existing shapes
         if auto_labeling_result.replace:
             self.load_shapes([], replace=True)
@@ -6290,8 +6245,8 @@ class LabelingWidget(LabelDialog):
                 if shape.label == AutoLabelingMode.OBJECT:
                     item = self.label_list.find_item_by_shape(shape)
                     self.label_list.remove_item(item)
-            # self.load_shapes(auto_labeling_result.shapes, replace=False)
-            self.load_shapes(badResultShapes, replace=False)
+            self.load_shapes(auto_labeling_result.shapes, replace=False)
+
         # Set image description
         if auto_labeling_result.description:
             description = auto_labeling_result.description
@@ -6300,17 +6255,7 @@ class LabelingWidget(LabelDialog):
             self.other_data["description"] = description
             self.shape_text_edit.setDisabled(False)
 
-        if auto_labeling_result.replace:
-            self.set_dirty()
-        else:
-            # 只转存那些可能有问题的标签
-            if countA != countB or countA != count[1]:
-                if count[0] > 0:
-                    self.set_dirty(1)
-                elif count[3] > 0:
-                    self.set_dirty(3)
-                elif count[2] > 0:
-                    self.set_dirty(2)
+        self.set_dirty()
 
     def clear_auto_labeling_marks(self):
         """Clear auto labeling marks from the current image."""
