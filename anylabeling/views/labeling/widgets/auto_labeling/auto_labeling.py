@@ -123,6 +123,7 @@ class AutoLabelingWidget(QWidget):
             self.cache_auto_label_changed
         )
         self.button_finish_object.setShortcut("F")
+        self.DealFun_combobox.currentIndexChanged.connect(self.on_handleSelectionChange)
         self.toggle_preserve_existing_annotations.stateChanged.connect(
             self.on_preserve_existing_annotations_state_changed
         )
@@ -404,6 +405,7 @@ class AutoLabelingWidget(QWidget):
             "input_iou",
             "output_label",
             "output_select_combobox",
+            "DealFun_combobox",
             "toggle_preserve_existing_annotations",
             "button_reset_tracker",
             "upn_select_combobox",
@@ -430,6 +432,20 @@ class AutoLabelingWidget(QWidget):
     def on_iou_value_changed(self, value):
         self.initial_iou_value = value
         self.model_manager.set_auto_labeling_iou(value)
+
+    def on_handleSelectionChange(self):
+        dealFunFlag = self.DealFun_combobox.currentIndex()
+        self.parent.dealFunFlag = dealFunFlag
+        if dealFunFlag == 0:
+            self.toggle_preserve_existing_annotations.show()
+        elif dealFunFlag == 1:
+            self.toggle_preserve_existing_annotations.show()
+        elif dealFunFlag == 2:
+            self.toggle_preserve_existing_annotations.hide()
+        elif dealFunFlag == 3:
+            self.toggle_preserve_existing_annotations.hide()
+        else:
+            self.toggle_preserve_existing_annotations.hide()
 
     def on_preserve_existing_annotations_state_changed(self, state):
         self.initial_preserve_annotations_state = state
@@ -545,6 +561,7 @@ class AutoLabelingWidget(QWidget):
 
             # Show preserve annotations toggle for all modes
             self.toggle_preserve_existing_annotations.show()
+            self.DealFun_combobox.show()
             # Set the default state for preserve annotations
             if mode in preserve_annotations_modes:
                 # Temporarily disconnect the signal to avoid triggering the callback

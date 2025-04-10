@@ -1222,7 +1222,9 @@ def upload_yolo_annotation(self, mode, LABEL_OPACITY):
             label_filename = osp.splitext(image_filename)[0] + ".txt"
             data_filename = osp.splitext(image_filename)[0] + ".json"
             if label_filename not in label_file_list:
-                continue
+                   # 创建一个空文件(因yolo训练时,背景图也需要有对应的标注文件)
+                   f = open(osp.join(label_dir_path, label_filename), 'w')
+                   f.close()
             input_file = osp.join(label_dir_path, label_filename)
             output_file = osp.join(output_dir_path, data_filename)
             image_file = osp.join(image_dir_path, image_filename)

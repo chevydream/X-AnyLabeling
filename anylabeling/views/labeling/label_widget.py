@@ -91,6 +91,11 @@ class LabelingWidget(LabelDialog):
             if output_file is None:
                 output_file = output
 
+        self.guibinglabels = []
+        self.start_time_all = 0.0
+        self.image_tuple = ()
+        self.dealFunFlag = 0
+
         self.filename = None
         self.image_path = None
         self.image_data = None
@@ -621,10 +626,26 @@ class LabelingWidget(LabelDialog):
         )
         save_crop = action(
             self.tr("&Save Cropped Image"),
-            lambda: utils.save_crop(self),
+			lambda: utils.save_crop(self, 0),
             icon="crop",
             tip=self.tr(
                 "Save cropped image. (Support rectangle/rotation/polygon shape_type)"
+            ),
+        )
+        save_crop_conf = action(
+            self.tr("&Save Cropped Image Group by Conf"),
+			lambda: utils.save_crop(self, 1),
+            icon="crop",
+            tip=self.tr(
+                "Save minmax image Group by Conf. (Support rectangle/rotation/polygon shape_type)"
+            ),
+        )
+        save_crop_size = action(
+            self.tr("&Save Cropped Image Group by Size"),
+            lambda: utils.save_crop(self, 2),
+            icon="crop",
+            tip=self.tr(
+                "Save minmax image Group by Size. (Support rectangle/rotation/polygon shape_type)"
             ),
         )
         label_manager = action(
@@ -1407,6 +1428,8 @@ class LabelingWidget(LabelDialog):
                 overview,
                 None,
                 save_crop,
+                save_crop_conf,
+                save_crop_size,
                 None,
                 label_manager,
                 gid_manager,

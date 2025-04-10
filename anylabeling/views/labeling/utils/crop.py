@@ -118,7 +118,7 @@ def process_single_image(args):
         args: Tuple containing 
         (image_file, label_dir_path, save_path, min_width, min_height, label_start_indices)
     """
-    image_file, label_dir_path, save_path, min_width, min_height, label_start_indices = args
+    image_file, label_dir_path, save_path, min_width, min_height, label_start_indices, typeflag = args
     try:
         image_name = osp.basename(image_file)
         label_file = osp.join(
@@ -148,6 +148,7 @@ def process_single_image(args):
         for shape in shapes:
             label = shape.get("label", "")
             points = np.array(shape.get("points", [])).astype(np.int32)
+            score = shape.get("score", 0.99)
             shape_type = shape.get("shape_type", "")
 
             if (
@@ -168,11 +169,28 @@ def process_single_image(args):
             xmax, ymax = min(width - 1, x + w), min(height - 1, y + h)
             cropped_image = image[ymin:ymax, xmin:xmax]
 
-            dst_path = Path(save_path) / label
+            if typeflag == 0:
+                dst_path = Path(save_path) / label
+            elif typeflag == 1: # 基于检测权重划分二级文件夹
+                score = score if score is not None else 0.99
+                subPath = f"0.{int(10*score)}~0.{int(10*(score+0.1))}" if int(10*score) < 9 else f"0.9~1.0"
+                dst_path = Path(save_path) / label / subPath
+            else: # 基于相对尺寸划分二级文件夹
+                score = max(1.0*(xmax-xmin+1)/width, 1.0*(ymax-ymin+1)/height)
+                subPath = f"0.{int(10*score)}0~0.{int(10*(score+0.1))}0" if int(10*score) < 9 else f"0.9~1.0"
+                subPath = f"0.0{int(100*score)}~0.0{int(100*(score+0.01))}" if int(10*score) < 1 else subPath
+                dst_path = Path(save_path) / label / subPath
             dst_path.mkdir(parents=True, exist_ok=True)
 
-            dst_file = dst_path / f"{orig_filename}_{current_index}-{shape_type}.jpg"
-
+            if typeflag == 0:
+                dst_file = dst_path / f"{orig_filename}_{current_index}-{shape_type}.jpg"
+            elif typeflag == 1: # 基于检测权重划分二级文件夹
+                #dst_file = dst_path / f"{orig_filename}_{format(score, '.2f')}.jpg"
+                dst_file = dst_path / f"{orig_filename}.jpg"
+            else: # 基于相对尺寸划分二级文件夹
+                #dst_file = dst_path / f"{orig_filename}_{format(score, '.2f')}.jpg"
+                dst_file = dst_path / f"{orig_filename}.jpg"
+                
             try:
                 is_success, buf = cv2.imencode(".jpg", cropped_image)
                 if is_success:
@@ -182,13 +200,21 @@ def process_single_image(args):
             except Exception as e:
                 logger.error(f"Error saving image: {str(e)}")
 
+            if len(shapes) == 0: # 将背景图收集到一起(子图用于发现标定错误的, 背景图用于发现没有标定的)
+                image_path = Path(image_file)
+                orig_filename = image_path.stem
+                dst_path = Path(save_path) / "background"
+                dst_path.mkdir(parents=True, exist_ok=True)
+                dst_file = dst_path / f"{orig_filename}.jpg"
+                shutil.copy(image_path, dst_file)
+                    
         return True
     except Exception as e:
         logger.error(f"Error processing {image_file}: {str(e)}")
         return False
 
 
-def save_crop(self):
+def save_crop(self, typeflag):
     """Save the cropped image with multiprocessing optimization"""
 
     if not self.filename:
@@ -369,7 +395,8 @@ def save_crop(self):
                 save_path,
                 min_width_spin.value(),
                 min_height_spin.value(),
-                current_indices.copy()
+                current_indices.copy(),
+                typeflag
             )
             for image_file in image_file_list
         ]
